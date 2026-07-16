@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>휠체어 장애물 회피 2D 게임</title>
+  <style>
+    :root{
+      --bg1:#0f172a;
+      --bg2:#111827;
+      --panel:rgba(15,23,42,.78);
+      --line:rgba(148,163,184,.22);
+      --text:#e5e7eb;
+      --muted:#94a3b8;
+      --accent:#38bdf8;
+    }
+    *{box-sizing:border-box}
+    html,body{
+      margin:0;
+      width:100%;
+      height:100%;
+      overflow:hidden;
+      font-family:system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR",sans-serif;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(56,189,248,.10), transparent 18%),
+        radial-gradient(circle at 80% 30%, rgba(168,85,247,.10), transparent 16%),
+        linear-gradient(180deg,var(--bg1),var(--bg2));
+      color:var(--text);
+      user-select:none;
+    }
+    #wrap{position:relative;width:100%;height:100%}
+    canvas{display:block;width:100%;height:100%;touch-action:none}
+    .hud{
+      position:absolute;top:14px;left:14px;right:14px;
+      display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;
+      z-index:5;pointer-events:none;
+    }
+    .card{
+      background:var(--panel);border:1px solid var(--line);border-radius:16px;
+      padding:12px 14px;backdrop-filter:blur(10px);box-shadow:0 10px 30px rgba(0,0,0,.25)
+    }
+    .title{font-size:18px;font-weight:900;margin-bottom:6px}
+    .stat{font-size:13px;color:var(--muted);line-height:1.6}
+    .big{color:#fff;font-size:22px;font-weight:900}
+    .center{
+      position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+      z-index:10;pointer-events:none;
+    }
+    .box{
+      width:min(620px, calc(100% - 28px));background:rgba(2,6,23,.66);
+      border:1px solid rgba(148,163,184,.2);border-radius:22px;padding:24px;text-align:center;
+      backdrop-filter:blur(10px);box-shadow:0 20px 60px rgba(0,0,0,.35)
+    }
+    .box h1{margin:0 0 10px 0;font-size:30px;letter-spacing:-.4px}
+    .box p{margin:8px 0;color:var(--muted);line-height:1.7;font-size:15px}
+    .buttons{margin-top:16px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap}
+    button{
+      border:none;border-radius:999px;padding:12px 18px;font-weight:900;cursor:pointer;
+      font-size:15px;background:var(--accent);color:#082f49
+    }
+    .ghost{background:transparent;color:var(--text);border:1px solid rgba(148,163,184,.3)}
+    .bottom{
+      position:absolute;left:14px;right:14px;bottom:14px;display:flex;justify-content:space-between;
+      gap:10px;flex-wrap:wrap;z-index:5;pointer-events:none;
+    }
+    .tip{
+      background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 12px;
+      color:var(--muted);font-size:13px;line-height:1.55
+    }
+    .hide{display:none !important}
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="game"></canvas>
+
+    <div class="hud">
+      <div class="card">
+        <div class="title">휠체어 장애물 회피</div>
+        <div class="stat">점수: <span class="big" id="score">0</span></div>
+        <div class="stat">최고점수: <span id="best">0</span></div>
+      </div>
+      <div class="card">
+        <div class="title">현재 모드</div>
+        <div class="stat" id="modeText">일반 휠체어</div>
+        <div class="stat">스페이스바로 탱크형 바퀴 전환</div>
+      </div>
+    </div>
+
+    <div class="center" id="overlay">
+      <div class="box">
+        <h1>휠체어 장애물 회피 게임</h1>
+        <p>
+          휠체어는 중앙에 고정되어 있고, 장애물은 오른쪽에서 왼쪽으로 지나갑니다.<br>
+          <b>낮은 계단</b>은 스페이스바로 탱크형 바퀴로 바꿔서 넘고,<br>
+          <b>대각선 경사로</b>는 일반 휠체어 상태로 넘어가세요.
+        </p>
+        <p>
+          오래 버틸수록 점수가 올라갑니다.<br>
+          <b>스페이스바</b>를 언제든지 눌러 휠체어 형태를 바꿀 수 있습니다.
+        </p>
+        <div class="buttons">
+          <button id="startBtn">게임 시작</button>
+          <button class="ghost" id="restartBtn">다시 시작</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="bottom">
+      <div class="tip">조작: 스페이스바로 탱크형 바퀴 전환 / 해제</div>
+      <div class="tip" id="statusText">대기 중</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const scoreEl = document.getElementById("score");
+    const bestEl = document.getElementById("best");
+    const modeText = document.getElementById("modeText");
+    const statusText = document.getElementById("statusText");
+    const overlay = document.getElementById("overlay");
+    const startBtn = document.getElementById("startBtn");
+    const restartBtn = document.getElementById("restartBtn");
+
+    let W = 0, H = 0, dpr = 1, running = false, gameOver = false, score = 0;
+    let best = Number(localStorage.getItem("wheelchairBestScore") || 0);
+    bestEl.textContent = best;
+
+    const player = { x: 0, y: 0, baseY: 0, mode: "normal" };
+    let obstacles = [], spawnTimer = 0, lastTime = 0;
+    const obstacleSpeed = 360;
+
+    function resize(){
+      dpr = Math.max(1, Math.min(2, devicePixelRatio || 1));
+      W = canvas.width = Math.floor(innerWidth * dpr);
+      H = canvas.height = Math.floor(innerHeight * dpr);
+      canvas.style.width = innerWidth + "px";
+      canvas.style.height = innerHeight + "px";
+      player.x = W * 0.5;
+      player.baseY = H * 0.74;
+      player.y = player.baseY;
+    }
+
+    function updateBest(){
+      best = Math.max(best, Math.floor(score));
+      localStorage.setItem("wheelchairBestScore", best);
+      bestEl.textContent = best;
+    }
+
+    function reset(){
+      score = 0;
+      gameOver = false;
+      obstacles = [];
+      spawnTimer = 0.7;
+      player.mode = "normal";
+      player.y = player.baseY;
+      overlay.classList.add("hide");
+      overlay.querySelector("h1").textContent = "휠체어 장애물 회피 게임";
+      overlay.querySelector("p").innerHTML = `
+        휠체어는 중앙에 고정되어 있고, 장애물은 오른쪽에서 왼쪽으로 지나갑니다.<br>
+        <b>낮은 계단</b>은 스페이스바로 탱크형 바퀴로 바꿔서 넘고,<br>
+        <b>대각선 경사로</b>는 일반 휠체어 상태로 넘어가세요.
+      `;
+      scoreEl.textContent = "0";
+      statusText.textContent = "진행 중";
+      modeText.textContent = "일반 휠체어";
+      updateBest();
+    }
+
+    function startGame(){
+      if (!running){
+        running = true;
+        lastTime = performance.now();
+        requestAnimationFrame(loop);
+      }
+      reset();
+    }
+
+    function endGame(msg){
+      gameOver = true;
+      statusText.textContent = msg;
+      updateBest();
+      overlay.classList.remove("hide");
+      overlay.querySelector("h1").textContent = "게임 오버";
+      overlay.querySelector("p").innerHTML = `점수: <b>${Math.floor(score)}</b><br>다시 시작해 장애물을 더 오래 버텨보세요.`;
+    }
+
+    function toggleMode(){
+      if (!running || gameOver) return;
+      player.mode = (player.mode === "normal") ? "tank" : "normal";
+      modeText.textContent = player.mode === "normal" ? "일반 휠체어" : "탱크형 바퀴";
+    }
+
+    function rand(a,b){ return a + Math.random() * (b-a); }
+
+    function spawnObstacle(){
+      const type = Math.random() < 0.5 ? "step" : "ramp";
+      const w = type === "step" ? rand(70, 140) : rand(100, 190);
+      const h = type === "step" ? rand(28, 72) : rand(42, 110);
+      obstacles.push({
+        type,
+        x: W + 120 * dpr,
+        y: H * 0.74,
+        w: w * dpr,
+        h: h * dpr,
+        speed: obstacleSpeed * dpr,
+        passed: false
+      });
+    }
+
+    function drawBackground(){
+      const g = ctx.createLinearGradient(0,0,0,H);
+      g.addColorStop(0, "#0f172a");
+      g.addColorStop(1, "#111827");
+      ctx.fillStyle = g;
+      ctx.fillRect(0,0,W,H);
+      for(let i=0;i<28;i++){
+        const y = (i * 90 * dpr) % H;
+        ctx.strokeStyle = "rgba(255,255,255,.05)";
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(W, y);
+        ctx.stroke();
+      }
+      ctx.fillStyle = "rgba(56,189,248,.08)";
+      ctx.fillRect(0, H*0.82, W, H*0.18);
+    }
+
+    function getSupportY(){
+      let y = player.baseY;
+      for (const o of obstacles){
+        const left = o.x, right = o.x + o.w;
+        if (player.x > left && player.x < right){
+          if (o.type === "ramp"){
+            const t = (player.x - left) / o.w;
+            y = o.y - o.h * t;
+          }else{
+            y = o.y - o.h;
+          }
+          break;
+        }
+      }
+      return y;
+    }
+
+    function drawPlayer(){
+      const x = player.x, y = player.y;
+      ctx.save();
+
+      ctx.fillStyle = "rgba(0,0,0,.28)";
+      ctx.beginPath();
+      ctx.ellipse(x, y + 28*dpr, 58*dpr, 12*dpr, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#d6a57a";
+      ctx.beginPath();
+      ctx.arc(x - 4*dpr, y - 58*dpr, 14*dpr, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#2f2a2a";
+      ctx.beginPath();
+      ctx.arc(x - 4*dpr, y - 60*dpr, 15*dpr, Math.PI*1.05, Math.PI*2.05);
+      ctx.fill();
+
+      ctx.fillStyle = "#c58f63";
+      ctx.fillRect(x - 9*dpr, y - 48*dpr, 6*dpr, 10*dpr);
+
+      ctx.fillStyle = "#f8fafc";
+      roundRect(x - 24*dpr, y - 42*dpr, 40*dpr, 42*dpr, 10*dpr);
+      ctx.fill();
+
+      ctx.strokeStyle = "#cbd5e1";
+      ctx.lineWidth = 2*dpr;
+      ctx.strokeRect(x - 24*dpr, y - 42*dpr, 40*dpr, 42*dpr);
+
+      ctx.strokeStyle = "#7c8aa0";
+      ctx.lineWidth = 5*dpr;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      ctx.moveTo(x - 2*dpr, y - 22*dpr);
+      ctx.lineTo(x - 28*dpr, y - 2*dpr);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(x + 10*dpr, y - 22*dpr);
+      ctx.lineTo(x + 34*dpr, y - 2*dpr);
+      ctx.stroke();
+
+      ctx.fillStyle = "#d6a57a";
+      ctx.beginPath();
+      ctx.arc(x - 28*dpr, y - 2*dpr, 4*dpr, 0, Math.PI*2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x + 34*dpr, y - 2*dpr, 4*dpr, 0, Math.PI*2);
+      ctx.fill();
+
+      ctx.fillStyle = "#cbd5e1";
+      ctx.beginPath();
+      ctx.moveTo(x - 4*dpr, y - 8*dpr);
+      ctx.lineTo(x + 18*dpr, y - 8*dpr);
+      ctx.lineTo(x + 28*dpr, y + 8*dpr);
+      ctx.lineTo(x + 6*dpr, y + 8*dpr);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillRect(x - 7*dpr, y - 42*dpr, 12*dpr, 42*dpr);
+
+      ctx.fillStyle = "#cbd5e1";
+      roundRect(x - 26*dpr, y - 34*dpr, 52*dpr, 34*dpr, 8*dpr);
+      ctx.fill();
+
+      ctx.fillStyle = "#e2e8f0";
+      roundRect(x - 20*dpr, y - 66*dpr, 14*dpr, 30*dpr, 5*dpr);
+      ctx.fill();
+
+      ctx.fillStyle = "#64748b";
+      ctx.fillRect(x - 24*dpr, y - 18*dpr, 48*dpr, 5*dpr);
+
+      if (player.mode === "normal"){
+        drawWheel(x - 32*dpr, y + 14*dpr, 24*dpr, 6*dpr, "#60a5fa");
+        drawWheel(x + 32*dpr, y + 14*dpr, 24*dpr, 6*dpr, "#60a5fa");
+        drawCaster(x - 44*dpr, y + 20*dpr, 10*dpr);
+        drawCaster(x + 44*dpr, y + 20*dpr, 10*dpr);
+      }else{
+        drawTankTrack(x - 38*dpr, y + 12*dpr, 18*dpr, 10*dpr);
+        drawTankTrack(x + 38*dpr, y + 12*dpr, 18*dpr, 10*dpr);
+        ctx.fillStyle = "#38bdf8";
+        ctx.fillRect(x - 32*dpr, y + 4*dpr, 64*dpr, 10*dpr);
+      }
+
+      ctx.restore();
+    }
+
+    function drawCaster(x, y, r){
+      ctx.fillStyle = "#94a3b8";
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawWheel(x, y, r, thickness, color){
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#0f172a";
+      ctx.beginPath();
+      ctx.arc(x, y, r - thickness, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    function drawTankTrack(x, y, w, h){
+      ctx.fillStyle = "rgba(56,189,248,.95)";
+      roundRect(x - w, y - h, w*2, h*2, 12*dpr); 
+      ctx.fill();
+      ctx.fillStyle = "#0f172a";
+      roundRect(x - w + 4*dpr, y - h + 4*dpr, w*2 - 8*dpr, h*2 - 8*dpr, 10*dpr); 
+      ctx.fill();
+      ctx.fillStyle = "rgba(125,211,252,.95)";
+      for(let i=-3;i<=3;i++) ctx.fillRect(x + i*5*dpr - 1.5*dpr, y - 5*dpr, 3*dpr, 10*dpr);
+    }
+
+    function drawObstacle(o){
+      const y = H * 0.74;
+      if (o.type === "step"){
+        const stepCount = Math.max(2, Math.round(o.h / (14 * dpr)));
+        const segW = o.w / stepCount;
+        const segH = o.h / stepCount;
+        ctx.fillStyle = "rgba(245,158,11,.95)";
+        for(let i=0;i<stepCount;i++){
+          ctx.fillRect(o.x + i*segW, y - (i+1)*segH, segW, segH);
+        }
+        ctx.fillStyle = "rgba(255,255,255,.2)";
+        for(let i=0;i<stepCount;i++){
+          ctx.strokeRect(o.x + i*segW, y - (i+1)*segH, segW, segH);
+        }
+        ctx.fillStyle = "#fde68a";
+        ctx.font = `${14*dpr}px sans-serif`;
+        ctx.fillText("계단", o.x + 4*dpr, y - o.h - 8*dpr);
+      }else{
+        ctx.fillStyle = "rgba(34,197,94,.88)";
+        ctx.beginPath();
+        ctx.moveTo(o.x, y);
+        ctx.lineTo(o.x + o.w, y - o.h);
+        ctx.lineTo(o.x + o.w + 18*dpr, y - o.h);
+        ctx.lineTo(o.x + 18*dpr, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,.22)";
+        ctx.lineWidth = 2*dpr;
+        ctx.stroke();
+        ctx.fillStyle = "#bbf7d0";
+        ctx.font = `${14*dpr}px sans-serif`;
+        ctx.fillText("경사로", o.x + 10*dpr, y - o.h - 8*dpr);
+      }
+    }
+
+    function roundRect(x, y, w, h, r){
+      const rr = Math.min(r, w/2, h/2);
+      ctx.beginPath();
+      ctx.moveTo(x + rr, y);
+      ctx.arcTo(x + w, y, x + w, y + h, rr);
+      ctx.arcTo(x + w, y + h, x, y + h, rr);
+      ctx.arcTo(x, y + h, x, y, rr);
+      ctx.arcTo(x, y, x + w, y, rr);
+      ctx.closePath();
+    }
+
+    function collides(o){
+      const px = player.x;
+      if (o.type === "step") return px > o.x && px < o.x + o.w && player.mode !== "tank";
+      return px > o.x && px < o.x + o.w + 18*dpr && player.mode !== "normal";
+    }
+
+    function update(dt){
+      if (!running || gameOver) return;
+      score += dt * 10;
+      scoreEl.textContent = Math.floor(score);
+
+      spawnTimer -= dt;
+      if (spawnTimer <= 0){
+        spawnObstacle();
+        spawnTimer = Math.max(0.55, 1.05 - score / 260);
+      }
+
+      for (let i = obstacles.length - 1; i >= 0; i--){
+        const o = obstacles[i];
+        o.x -= o.speed * dt;
+        if (!o.passed && o.x + o.w < player.x - 40*dpr){
+          o.passed = true;
+          statusText.textContent = o.type === "step" ? "계단을 지나쳤습니다." : "경사로를 지나쳤습니다.";
+        }
+        if (collides(o)){
+          endGame(o.type === "step" ? "낮은 계단에 걸렸습니다." : "경사로를 넘지 못했습니다.");
+          return;
+        }
+        if (o.x + o.w < -100*dpr) obstacles.splice(i, 1);
+      }
+
+      player.y += (getSupportY() - player.y) * 0.18;
+      if (Math.floor(score) % 100 === 0 && Math.floor(score) > 0) statusText.textContent = "오래 버티는 중...";
+    }
+
+    function render(){
+      drawBackground();
+      ctx.fillStyle = "rgba(255,255,255,.08)";
+      ctx.fillRect(W * 0.16, 0, 2*dpr, H);
+      ctx.fillRect(W * 0.84, 0, 2*dpr, H);
+      for (const o of obstacles) drawObstacle(o);
+      drawPlayer();
+    }
+
+    function loop(t){
+      const dt = Math.min(0.033, (t - lastTime) / 1000 || 0);
+      lastTime = t;
+      update(dt);
+      render();
+      requestAnimationFrame(loop);
+    }
+
+    function spawnObstacle(){
+      const type = Math.random() < 0.5 ? "step" : "ramp";
+      const w = type === "step" ? rand(70, 140) : rand(100, 190);
+      const h = type === "step" ? rand(28, 72) : rand(42, 110);
+      obstacles.push({
+        type,
+        x: W + 120 * dpr,
+        y: H * 0.74,
+        w: w * dpr,
+        h: h * dpr,
+        speed: obstacleSpeed * dpr,
+        passed: false
+      });
+    }
+
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space"){
+        e.preventDefault();
+        toggleMode();
+      }
+      if (!running && (e.code === "Enter" || e.code === "Space")) startGame();
+      if (gameOver && (e.code === "Enter" || e.code === "Space")) startGame();
+    });
+    window.addEventListener("pointerdown", () => { if (!running || gameOver) startGame(); });
+    startBtn.addEventListener("click", startGame);
+    restartBtn.addEventListener("click", startGame);
+    window.addEventListener("resize", resize);
+
+    resize();
+    render();
+  </script>
+</body>
+</html>
